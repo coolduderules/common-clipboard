@@ -129,10 +129,10 @@ def detect_server_change():
 def mainloop():
     while run_app:
         try:
-            requests.get(TEST_INTERNET_URL)
+            # requests.head(TEST_INTERNET_URL)
             detect_server_change()
             detect_local_copy()
-        except (requests.exceptions.ConnectionError, TimeoutError, OSError) as e:
+        except (requests.exceptions.ConnectionError, TimeoutError, OSError):
             systray.title = f'{APP_NAME}: Not Connected'
             if run_app:
                 find_server()
@@ -196,6 +196,7 @@ if __name__ == '__main__':
     APP_NAME = 'Common Clipboard'
     LISTENER_DELAY = 0.3
     TEST_INTERNET_URL = 'https://8.8.8.8'
+    TEST_INTERNET_DELAY = 1
 
     server_url = ''
     ipaddr = gethostbyname(gethostname())
