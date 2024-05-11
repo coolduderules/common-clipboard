@@ -8,7 +8,7 @@ import win32clipboard as clipboard
 import sys
 import os
 import pickle
-from socket import gethostbyname, gethostname, gaierror
+from socket import gethostbyname, gethostname
 from threading import Thread
 from multiprocessing import freeze_support, Value, Process
 from multiprocessing.managers import BaseManager
@@ -22,8 +22,8 @@ from port_editor import PortEditor
 
 
 class Format(Enum):
-    TEXT = clipboard.CF_UNICODETEXT
-    IMAGE = clipboard.RegisterClipboardFormat('PNG')
+    TEXT = 'text'
+    IMAGE = 'image'
 
 
 def register(address):
@@ -76,19 +76,20 @@ def find_server():
 
 def get_copied_data():
     try:
-        for fmt in list(Format):
-            if clipboard.IsClipboardFormatAvailable(fmt.value):
-                clipboard.OpenClipboard()
-                data = clipboard.GetClipboardData(fmt.value)
-                clipboard.CloseClipboard()
-                return data, fmt
+        clipboard.OpenClipboard()
+        for fmt in CLIPBOARD_FORMATS.values():
+            if clipboard.IsClipboardFormatAvailable(fmt):
+                data = clipboard.GetClipboardData(fmt)
+                return data, FORMAT_TO_ENUM[fmt]
         else:
-            raise BaseException
-    except BaseException:
+            raise ValueError
+    except ValueError:
         try:
             return current_data, current_format
         except NameError:
             return '', Format.TEXT
+    finally:
+        clipboard.CloseClipboard()
 
 
 def detect_local_copy():
@@ -103,7 +104,7 @@ def detect_local_copy():
         file = BytesIO()
         file.write(current_data.encode() if current_format == Format.TEXT else current_data)
         file.seek(0)
-        requests.post(server_url + '/clipboard', data=file, headers={'Data-Type': format_to_type[current_format]})
+        requests.post(server_url + '/clipboard', data=file, headers={'Data-Type': current_format.value})
 
 
 def detect_server_change():
@@ -113,13 +114,25 @@ def detect_server_change():
     headers = requests.head(server_url + '/clipboard', timeout=2)
     if headers.ok and headers.headers['Data-Attached'] == 'True':
         data_request = requests.get(server_url + '/clipboard')
-        data_format = type_to_format[data_request.headers['Data-Type']]
-        data = data_request.content.decode() if data_format == Format.TEXT else data_request.content
+        data_format = data_request.headers['Data-Type']
+        data_content = data_request.content
 
         try:
             clipboard.OpenClipboard()
             clipboard.EmptyClipboard()
-            clipboard.SetClipboardData(data_format.value, data)
+
+            if data_format == Format.TEXT.value:
+                clipboard.SetClipboardData(CLIPBOARD_FORMATS['text'], data_content.decode())
+            elif data_format == Format.IMAGE.value:
+                image = Image.open(BytesIO(data_content))
+                dib_file = BytesIO()
+                image.save(dib_file, 'DIB')
+                dib_data = dib_file.getvalue()
+                dib_file.close()
+
+                clipboard.SetClipboardData(CLIPBOARD_FORMATS['png_image'], data_content)
+                clipboard.SetClipboardData(CLIPBOARD_FORMATS['dib_image'], dib_data)
+
             clipboard.CloseClipboard()
             current_data, current_format = get_copied_data()
         except BaseException:
@@ -198,6 +211,18 @@ if __name__ == '__main__':
     TEST_INTERNET_URL = 'https://8.8.8.8'
     TEST_INTERNET_DELAY = 1
 
+    CLIPBOARD_FORMATS = {
+        'text': clipboard.CF_UNICODETEXT,
+        'png_image': clipboard.RegisterClipboardFormat('PNG'),
+        'dib_image': clipboard.CF_DIB
+    }
+
+    FORMAT_TO_ENUM = {
+        CLIPBOARD_FORMATS['text']: Format.TEXT,
+        CLIPBOARD_FORMATS['png_image']: Format.IMAGE,
+        CLIPBOARD_FORMATS['dib_image']: Format.IMAGE
+    }
+
     server_url = ''
     ipaddr = gethostbyname(gethostname())
     split_ipaddr = [int(num) for num in ipaddr.split('.')]
@@ -210,7 +235,7 @@ if __name__ == '__main__':
     server_timestamp = Value('d', 0)
 
     running_server = False
-    server_process: Process = None
+    server_process = None
 
     try:
         data_dir = os.path.join(os.getenv('LOCALAPPDATA'), APP_NAME)
@@ -228,9 +253,6 @@ if __name__ == '__main__':
         port = 5000
 
     current_data, current_format = get_copied_data()
-
-    format_to_type = {Format.TEXT: 'text', Format.IMAGE: 'image'}
-    type_to_format = {v: k for k, v in format_to_type.items()}
 
     icon = Image.open('systray_icon.ico')
     systray = Icon(APP_NAME, icon=icon, title=APP_NAME, menu=Menu(get_menu_items))
