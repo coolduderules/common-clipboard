@@ -68,7 +68,7 @@ def find_server():
         register(ipaddr)
         systray.title = f'{APP_NAME}: Server Running'
 
-        generator_thread = Thread(target=generate_ips)
+        generator_thread = Thread(target=generate_ips, daemon=True)
         generator_thread.start()
     except requests.exceptions.ConnectionError:
         server_url = ''
@@ -83,7 +83,7 @@ def get_copied_data():
                 return data, FORMAT_TO_ENUM[fmt]
         else:
             raise ValueError
-    except ValueError:
+    except (ValueError, BaseException):
         try:
             return current_data, current_format
         except NameError:
@@ -248,8 +248,8 @@ if __name__ == '__main__':
     preferences_file = os.path.join(data_dir, 'preferences.pickle')
     try:
         with open(preferences_file, 'rb') as preferences:
-            port = pickle.load(preferences)
-    except FileNotFoundError:
+            port = int(pickle.load(preferences))
+    except (FileNotFoundError, TypeError):
         port = 5000
 
     current_data, current_format = get_copied_data()
